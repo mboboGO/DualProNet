@@ -1,0 +1,11 @@
+[12/17 23:28:33] model INFO: Namespace(L_ood=1, aug='v6', backbone='resnet101', batch_size=32, data='/data06/v-shaomi/data/CUB_200_2011/CUB_200_2011/images/', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', epoch_decay=30, epochs=90, flipping_test=False, gpu=None, is_fix=True, logger=<Logger model (DEBUG)>, lr=0.001, model_name='base', momentum=0.9, print_freq=10, resume='', save_path='run_base', seed=None, start_epoch=0, weight_decay=0.0001, workers=32, world_size=1)
+[12/17 23:28:33] model INFO: ==> random seed: 5236
+[12/17 23:28:33] model INFO: ==> image aug: v6
+[12/17 23:28:46] model INFO: => is the backbone fixed: 'True'
+[12/17 23:29:10] model INFO: Epoch: [0][0/221] loss: L_ood 5.3171 L_zsr 5.8667 L_zsr 5.2924
+[12/17 23:29:15] model INFO: Epoch: [0][10/221] loss: L_ood 4.7876 L_zsr 5.1082 L_zsr 4.9667
+[12/17 23:29:19] model INFO: Epoch: [0][20/221] loss: L_ood 4.7413 L_zsr 5.0646 L_zsr 4.9622
+[12/17 23:29:22] model INFO: Epoch: [0][30/221] loss: L_ood 4.6493 L_zsr 5.0553 L_zsr 4.9123
+[12/17 23:29:26] model INFO: Epoch: [0][40/221] loss: L_ood 3.6925 L_zsr 4.7968 L_zsr 4.6759
+[12/17 23:29:30] model INFO: Epoch: [0][50/221] loss: L_ood 3.4802 L_zsr 5.0053 L_zsr 4.8898
+[12/17 23:29:34] model INFO: Epoch: [0][60/221] loss: L_ood 3.1164 L_zsr 4.5187 L_zsr 4.3978

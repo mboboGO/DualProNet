@@ -1,0 +1,9 @@
+[12/17 23:27:28] model INFO: Namespace(L_ood=1, aug='v6', backbone='resnet101', batch_size=32, data='/data06/v-shaomi/data/CUB_200_2011/CUB_200_2011/images/', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', epoch_decay=30, epochs=90, flipping_test=False, gpu=None, is_fix=True, logger=<Logger model (DEBUG)>, lr=0.001, model_name='base', momentum=0.9, print_freq=10, resume='', save_path='run_base', seed=None, start_epoch=0, weight_decay=0.0001, workers=32, world_size=1)
+[12/17 23:27:28] model INFO: ==> random seed: 3138
+[12/17 23:27:28] model INFO: ==> image aug: v6
+[12/17 23:27:35] model INFO: => is the backbone fixed: 'True'
+[12/17 23:27:54] model INFO: Namespace(L_ood=1, aug='v4', backbone='resnet101', batch_size=128, data='cub', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', epoch_decay=30, epochs=180, flipping_test=False, gpu=None, is_fix=False, logger=<Logger model (DEBUG)>, lr=0.001, model_name='base', momentum=0.9, print_freq=10, resume='./cub/output/fix.model', save_path='run_base', seed=None, start_epoch=0, weight_decay=0.0001, workers=32, world_size=1)
+[12/17 23:27:54] model INFO: ==> random seed: 3389
+[12/17 23:27:54] model INFO: ==> image aug: v4
+[12/17 23:28:00] model INFO: => is the backbone fixed: 'False'
+[12/17 23:28:00] model INFO: => no checkpoint found at './cub/output/fix.model'
