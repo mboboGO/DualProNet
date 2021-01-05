@@ -81,7 +81,7 @@ class PrtCateLayer(nn.Module):
         w = self.activation(self.fc1(prt1))
         w = F.sigmoid(self.fc2(w))
         # Excitation
-        prt = prt1 * w + prt1
+        prt = prt1# + prt1 * w 
         return prt
 
     def forward(self, in_prt, query):
@@ -292,7 +292,7 @@ class Loss(nn.Module):
         for logit in zsr_logits_cate:
             L_cate += self.cls_loss(logit,label)/len(zsr_logits_cate)
         
-        L_zsr = L_att + L_cate
+        L_zsr = L_att + self.args.L_cate*L_cate
         
         ''' OOD Loss '''
         L_ood = self.cls_loss(ood_logit,label)

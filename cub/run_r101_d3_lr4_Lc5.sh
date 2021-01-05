@@ -3,14 +3,13 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-export CUDA_VISIBLE_DEVICES=3,5
+#export CUDA_VISIBLE_DEVICES=3,5
 
 MODEL=pro_net
 DATANAME=cub
 BACKBONE=resnet101
-DATAPATH=/data06/v-shaomi/data/CUB_200_2011/CUB_200_2011/images/
+DATAPATH=../../data/CUB_200_2011/CUB_200_2011/images/
 SAVEPATH=${DATANAME}/output/${script_name}
-nvidia-smi
 
 STAGE1=1
 STAGE2=1
@@ -20,8 +19,9 @@ then
   python main.py \
     --batch-size 128 \
     --lr 1e-4 \
-    --n-enc 0 \    
+    --n-enc 0 \
     --n-dec 3 \
+    --L_cate 5 \
     --epochs 90 \
     --backbone ${BACKBONE} \
     --model-name ${MODEL} \
@@ -34,7 +34,7 @@ fi
 if [ ${STAGE2} = 1 ]
 then
   python main.py \
-    --batch-size 12 \
+    --batch-size 24 \
     --lr 1e-4 \
     --n-enc 0 \
     --n-dec 3 \

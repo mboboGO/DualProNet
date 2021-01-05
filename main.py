@@ -56,10 +56,11 @@ parser.add_argument('--is_fix', dest='is_fix', action='store_true',
 ''' opt for model '''
 parser.add_argument('--backbone', default='resnet101', help='')
 parser.add_argument('--model-name', default='dvbe', help='')
-parser.add_argument('--n-enc', default=0, type=int,help='')
-parser.add_argument('--n-dec', default=1, type=int,help='')
+parser.add_argument('--n-enc', default=0, type=int, help='')
+parser.add_argument('--n-dec', default=3, type=int, help='')
 ''' opt for loss '''
-parser.add_argument('--L_ood', default=1, type=float,help='sigma.')
+parser.add_argument('--L_ood', default=1, type=float,help='')
+parser.add_argument('--L_cate', default=1, type=float,help='')
 ''' opt for others '''
 parser.add_argument('--save-path', '-s', metavar='SAVE', default='',
                     help='saving path')
