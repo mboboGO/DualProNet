@@ -170,16 +170,7 @@ def main():
         model = torch.nn.DataParallel(model).cuda()
     criterion = criterion.cuda(args.gpu)
 
-
-    ''' optimizer '''
-    ood_params = [v for k, v in model.named_parameters() if 'ood_' in k]
-    zsr_params = [v for k, v in model.named_parameters() if 'zsr_' in k]
-    
-    ood_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, ood_params),
-                         100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    zsr_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, zsr_params), args.lr,
-                                    betas=(0.5,0.999),weight_decay=args.weight_decay)
-                                    
+    ''' optimizer '''           
     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                          args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -205,11 +196,9 @@ def main():
         if args.distributed:
             train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer, epoch, args.lr, args.epoch_decay)
-        adjust_learning_rate(ood_optimizer, epoch, 100*args.lr, args.epoch_decay)
-        adjust_learning_rate(zsr_optimizer, epoch, args.lr, args.epoch_decay)
         
         # train for one epoch
-        train(train_loader,semantic_data, model, criterion, optimizer, ood_optimizer, zsr_optimizer, epoch,is_fix=args.is_fix)
+        train(train_loader,semantic_data, model, criterion, optimizer, epoch,is_fix=args.is_fix)
         
         # evaluate on validation set
         prec1 = validate(val_loader1, val_loader2, semantic_data, model, criterion)
@@ -233,7 +222,7 @@ def main():
             args.logger.info('saving!!!!')
 
 
-def train(train_loader, semantic_data, model, criterion, optimizer, ood_optimizer, zsr_optimizer, epoch,is_fix):    
+def train(train_loader, semantic_data, model, criterion, optimizer, epoch,is_fix):    
     # switch to train mode
     model.train()
     if(is_fix):
@@ -251,17 +240,9 @@ def train(train_loader, semantic_data, model, criterion, optimizer, ood_optimize
         total_loss,L_ood,L_zsr,L_att,L_cate = criterion(target,logits,feats)
 
         # compute gradient and do SGD step
-        if args.is_fix:
-            ood_optimizer.zero_grad()
-            L_ood.backward()
-            ood_optimizer.step()        
-            zsr_optimizer.zero_grad()
-            L_zsr.backward()
-            zsr_optimizer.step()
-        else:
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
         
         if i % args.print_freq == 0:
             args.logger.info('Epoch: [{}][{}/{}] loss: L_ood {:.4f} L_zsr {:.4f} L_att {:.4f} L_cate {:.4f}'.format(epoch, i, len(train_loader),L_ood.item(),L_zsr.item(),L_att.item(),L_cate.item()))

@@ -213,11 +213,11 @@ class Model(nn.Module):
             x = vis_query.permute(1, 2, 0).view(bs, c, h, w)
             zsr_x = self.avgpool(x).view(bs,-1)
             #zsr_x = self.zsr_pred(x).sigmoid().squeeze()    
-            zsr_w = self.zsr_sem_proj(self.sf)
+            zsr_w = self.zsr_sem_proj(self.sf.cuda())
             w_norm = F.normalize(zsr_w, p=2, dim=1)
             x_norm = F.normalize(zsr_x, p=2, dim=1)
-            zsr_logit = [x_norm.mm(w_norm.permute(1,0))]
-            zsr_logit_aux = [self.zsr_aux_cls(zsr_x)]
+            zsr_logit_att = [x_norm.mm(w_norm.permute(1,0))]
+            zsr_logit_cate = [self.zsr_aux_cls(zsr_x)]
         else:
             # prt init
             prt_att_init = self.zsr_prt_emb_att.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
