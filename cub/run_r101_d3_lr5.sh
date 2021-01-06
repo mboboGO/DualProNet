@@ -3,7 +3,7 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-#export CUDA_VISIBLE_DEVICES=3,5
+#export CUDA_VISIBLE_DEVICES=4,6
 
 MODEL=pro_net
 DATANAME=cub
@@ -12,13 +12,14 @@ DATAPATH=../../data/CUB_200_2011/CUB_200_2011/images/
 SAVEPATH=${DATANAME}/output/${script_name}
 
 STAGE1=1
-STAGE2=1
+STAGE2=0
 
 if [ ${STAGE1} = 1 ]
 then
   python main.py \
     --batch-size 128 \
-    --lr 1e-4 \
+    --lr 1e-5\
+    --L_ood 1e4 \
     --n-enc 0 \
     --n-dec 3 \
     --epochs 90 \
@@ -34,7 +35,7 @@ if [ ${STAGE2} = 1 ]
 then
   python main.py \
     --batch-size 24 \
-    --lr 1e-5 \
+    --lr 1e-4 \
     --n-enc 0 \
     --n-dec 3 \
     --backbone ${BACKBONE} \
