@@ -43,7 +43,9 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--lr', default=0.001, type=float,
+parser.add_argument('--lr_ada', default=0.001, type=float,
+                    metavar='LR', help='initial learning rate')
+parser.add_argument('--lr_sgd', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--epoch_decay', default=30, type=int,
                     metavar='LR', help='initial learning rate')
@@ -170,9 +172,18 @@ def main():
         model = torch.nn.DataParallel(model).cuda()
     criterion = criterion.cuda(args.gpu)
 
-    ''' optimizer '''           
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                         args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    ''' optimizer '''
+    if args.is_fix:
+        odr_params = [v for k, v in model.named_parameters() if 'ood' in k]
+        zsr_params = [v for k, v in model.named_parameters() if 'zsr' in k]
+
+        sgd_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, odr_params),
+                     args.lr_sgd, momentum=args.momentum, weight_decay=args.weight_decay)
+        ada_optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, zsr_params), args.lr_ada,
+                                betas=(0.5,0.999),weight_decay=args.weight_decay)
+    else:                 
+        sgd_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                     args.lr_sgd, momentum=args.momentum, weight_decay=args.weight_decay)
 
     ''' optionally resume from a checkpoint'''
     if args.resume:
@@ -195,10 +206,11 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, epoch, args.lr, args.epoch_decay)
+        adjust_learning_rate(sgd_optimizer, epoch, args.lr_sgd, args.epoch_decay)
+        adjust_learning_rate(ada_optimizer, epoch, args.lr_ada, args.epoch_decay)
         
         # train for one epoch
-        train(train_loader,semantic_data, model, criterion, optimizer, epoch,is_fix=args.is_fix)
+        train(train_loader,semantic_data, model, criterion, sgd_optimizer, ada_optimizer, epoch,is_fix=args.is_fix)
         
         # evaluate on validation set
         prec1 = validate(val_loader1, val_loader2, semantic_data, model, criterion)
@@ -222,7 +234,7 @@ def main():
             args.logger.info('saving!!!!')
 
 
-def train(train_loader, semantic_data, model, criterion, optimizer, epoch,is_fix):    
+def train(train_loader, semantic_data, model, criterion, sgd_optimizer, ada_optimizer, epoch,is_fix):    
     # switch to train mode
     model.train()
     if(is_fix):
@@ -240,9 +252,18 @@ def train(train_loader, semantic_data, model, criterion, optimizer, epoch,is_fix
         total_loss,L_ood,L_zsr,L_att,L_cate = criterion(target,logits,feats)
 
         # compute gradient and do SGD step
-        optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
+        if is_fix:
+            sgd_optimizer.zero_grad()
+            L_ood.backward()
+            sgd_optimizer.step()
+        
+            ada_optimizer.zero_grad()
+            L_zsr.backward()
+            ada_optimizer.step()
+        else:
+            ada_optimizer.zero_grad()
+            total_loss.backward()
+            ada_optimizer.step()
         
         if i % args.print_freq == 0:
             args.logger.info('Epoch: [{}][{}/{}] loss: L_ood {:.4f} L_zsr {:.4f} L_att {:.4f} L_cate {:.4f}'.format(epoch, i, len(train_loader),L_ood.item(),L_zsr.item(),L_att.item(),L_cate.item()))
