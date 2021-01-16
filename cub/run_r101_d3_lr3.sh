@@ -3,7 +3,7 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-#export CUDA_VISIBLE_DEVICES=4,6
+export CUDA_VISIBLE_DEVICES=5,7
 
 MODEL=pro_net
 DATANAME=cub
@@ -16,10 +16,12 @@ STAGE2=0
 
 if [ ${STAGE1} = 1 ]
 then
-  python main.py \
+  python -m torch.distributed.launch \
+    --nproc_per_node=2 \
+    main.py \
     --batch-size 128 \
-    --lr 1e-3 \
-    --L_ood 1e2 \
+    --lr_zsr 1e-3 \
+    --lr_ood 1e-1 \
     --n-enc 0 \
     --n-dec 3 \
     --epochs 90 \
@@ -28,12 +30,15 @@ then
     --data-name ${DATANAME} \
     --save-path ${SAVEPATH} \
     --data ${DATAPATH} \
+    --is-syncbn \
     --is_fix 
 fi
 
 if [ ${STAGE2} = 1 ]
 then
-  python main.py \
+  python -m torch.distributed.launch \
+    --nproc_per_node=2 \
+    main.py \
     --batch-size 24 \
     --lr 1e-4 \
     --n-enc 0 \
@@ -43,7 +48,8 @@ then
     --data-name ${DATANAME} \
     --save-path ${SAVEPATH} \
     --data ${DATAPATH} \
-    --resume ${SAVEPATH}/fix.model
+    --resume ${SAVEPATH}/fix.model \
+    --is-syncbn \
 fi
 
 

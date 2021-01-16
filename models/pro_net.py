@@ -73,15 +73,17 @@ class PrtCateLayer(nn.Module):
         self.fc1 = nn.Linear(dim, dim//n)  # Use nn.Conv2d instead of nn.Linear
         self.fc2 = nn.Linear(dim//n, dim)
         
+        self.bias = nn.Embedding(n, dim)      
+        
         self.activation = nn.ReLU()
 
     def prt_refine(self, prt):
-        prt1 = self.linear2(self.activation(self.linear1(prt)))
-        
-        w = self.activation(self.fc1(prt1))
-        w = F.sigmoid(self.fc2(w))
+        # channel att
+        w = F.sigmoid(self.fc2(self.activation(self.fc1(prt))))
+        # prt refinement
+        prt = self.linear2(self.activation(self.linear1(prt)))
         # Excitation
-        prt = prt1# + prt1 * w 
+        prt = prt * w + self.bias.weight
         return prt
 
     def forward(self, in_prt, query):
@@ -159,21 +161,23 @@ class Model(nn.Module):
             )
             self.zsr_aux_cls = nn.Linear(feat_dim, num_classes)
         else:
-            n_per_att = int(feat_dim/sf_size)
-            n_att_emb = n_per_att*sf_size
+            n_prt_att = sf_size
+            att_dim = int(feat_dim/n_prt_att)+1      
+            
+            n_prt_cat = num_classes      
+            cat_dim = att_dim*n_prt_att                                  
             # att prt
             self.zsr_prt_emb_att = nn.Embedding(sf_size, feat_dim)
             self.zsr_prt_ref_att = _get_clones(PrtAttLayer(dim=feat_dim, nhead=8), args.n_dec)
-            self.zsr_prt_proj_att = _get_clones(nn.Sequential(nn.Linear(feat_dim,n_per_att),nn.LeakyReLU()), args.n_dec)
+            self.zsr_prt_proj_att = _get_clones(nn.Sequential(nn.Linear(feat_dim,att_dim),nn.LeakyReLU()), args.n_dec)
             # cate prt
-            self.zsr_prt_emb_cate = nn.Embedding(num_classes, n_att_emb)
-            self.zsr_prt_ref_cate = _get_clones(PrtCateLayer(dim=n_att_emb, n=n_per_att), args.n_dec)
-            
+            self.zsr_prt_emb_cate = nn.Embedding(n_prt_cat, cat_dim)            
+            self.zsr_prt_ref_cate = _get_clones(PrtCateLayer(dim=cat_dim, n=n_prt_cat), args.n_dec)
             # sem proj
             self.zsr_sem_proj = nn.Sequential(
                 nn.Linear(sf_size,1024),
                 nn.LeakyReLU(),
-                nn.Linear(1024,n_att_emb),
+                nn.Linear(1024,cat_dim),
                 nn.LeakyReLU(),
             )
         
@@ -221,7 +225,7 @@ class Model(nn.Module):
         else:
             # prt init
             prt_att_init = self.zsr_prt_emb_att.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
-            prt_cate_init = self.zsr_prt_emb_cate.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
+            prt_cate_init = self.zsr_prt_emb_cate.weight#.unsqueeze(1).repeat(1, bs, 1).cuda()
             # semantic projection
             zsr_w = self.zsr_sem_proj(self.sf.cuda())
             w_norm = F.normalize(zsr_w, p=2, dim=1)
@@ -238,11 +242,10 @@ class Model(nn.Module):
             # category prototype refine
             prt = prt_cate_init
             zsr_logit_cate = []
-            for prt_ref,query in zip(self.zsr_prt_ref_cate,vis_att_query):
+            for prt_ref,query in zip(self.zsr_prt_ref_cate,vis_att_query):        
                 prt = prt_ref(prt,query)
-                classifier = prt.permute(1,0,2)
-                query = query.unsqueeze(2)
-                logit = classifier.bmm(query).squeeze()
+                classifier = prt#.permute(1,0,2)
+                logit = query.mm(classifier.permute(1,0))
                 zsr_logit_cate.append(logit)
         
         ''' OOD Module '''
@@ -288,7 +291,7 @@ class Loss(nn.Module):
         for logit in zsr_logits_att:
             idx = torch.arange(logit.size(0)).long()
             L_att += (1-logit[idx,label]).mean()/len(zsr_logits_att)
-        L_cate = 0
+        L_cate = 0        
         for logit in zsr_logits_cate:
             L_cate += self.cls_loss(logit,label)/len(zsr_logits_cate)
         

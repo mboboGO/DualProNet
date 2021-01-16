@@ -11,7 +11,19 @@ import torch
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
                                  
-               
+
+@torch.no_grad()
+def all_gather(tensor):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    tensors_gather = [torch.ones_like(tensor)
+        for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+
+    return tensors_gather
+    
 def normt_spm(mx, method='in'):
     if method == 'in':
         mx = mx.transpose()
