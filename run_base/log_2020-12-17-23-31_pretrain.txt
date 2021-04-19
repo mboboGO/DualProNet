@@ -1,3 +1,0 @@
-[12/17 23:31:50] model INFO: Namespace(L_ood=1, aug='v6', backbone='resnet101', batch_size=32, data='/data06/v-shaomi/data/CUB_200_2011/CUB_200_2011/images/', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', epoch_decay=30, epochs=90, flipping_test=False, gpu=None, is_fix=True, logger=<Logger model (DEBUG)>, lr=0.001, model_name='base', momentum=0.9, print_freq=10, resume='', save_path='run_base', seed=None, start_epoch=0, weight_decay=0.0001, workers=32, world_size=1)
-[12/17 23:31:50] model INFO: ==> random seed: 3924
-[12/17 23:31:50] model INFO: ==> image aug: v6

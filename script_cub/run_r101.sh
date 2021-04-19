@@ -3,47 +3,40 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-export CUDA_VISIBLE_DEVICES=5,7
+export CUDA_VISIBLE_DEVICES=5
 
-MODEL=pro_net
+MODEL=base_s2v
 DATANAME=cub
-BACKBONE=resnet101
+BACKBONE=r101
 DATAPATH=../../data/CUB_200_2011/CUB_200_2011/images/
-SAVEPATH=${DATANAME}/output/${script_name}
+SAVEPATH=output/${DATANAME}/${script_name}
 
-STAGE1=0
+STAGE1=1
 STAGE2=1
 
 if [ ${STAGE1} = 1 ]
 then
   python main.py \
     --batch-size 128 \
-    --lr_zsr 1e-3 \
-    --lr_ood 1e-1 \
-    --n-enc 0 \
-    --n-dec 0 \
+    --lr 1e-3 \
     --epochs 90 \
     --backbone ${BACKBONE} \
-    --model-name ${MODEL} \
+    --model ${MODEL} \
     --data-name ${DATANAME} \
     --save-path ${SAVEPATH} \
     --data ${DATAPATH} \
-    --is_fix 
+    --is_fix
 fi
 
 if [ ${STAGE2} = 1 ]
 then
   python main.py \
-    --batch-size 24 \
-    --lr_zsr 1e-3 \
-    --n-enc 0 \
-    --n-dec 0 \
+    --batch-size 16 \
+    --lr 1e-4 \
+    --epochs 90 \
     --backbone ${BACKBONE} \
-    --model-name ${MODEL} \
+    --model ${MODEL} \
     --data-name ${DATANAME} \
     --save-path ${SAVEPATH} \
-    --data ${DATAPATH} \
-    --resume ${SAVEPATH}/fix.model
+    --data ${DATAPATH}
 fi
-
-

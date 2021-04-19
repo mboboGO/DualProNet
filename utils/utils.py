@@ -24,50 +24,11 @@ def all_gather(tensor):
 
     return tensors_gather
     
-def normt_spm(mx, method='in'):
-    if method == 'in':
-        mx = mx.transpose()
-        rowsum = np.array(mx.sum(1))
-        r_inv = np.power(rowsum, -1).flatten()
-        r_inv[np.isinf(r_inv)] = 0.
-        r_mat_inv = sp.diags(r_inv)
-        mx = r_mat_inv.dot(mx)
-        return mx
-    
-    if method == 'sym':
-        rowsum = np.array(mx.sum(1))
-        r_inv = np.power(rowsum, -0.5).flatten()
-        r_inv[np.isinf(r_inv)] = 0.
-        r_mat_inv = sp.diags(r_inv)
-        mx = mx.dot(r_mat_inv).transpose().dot(r_mat_inv)
-        return mx
-    
-def spm_to_tensor(sparse_mx):
-    sparse_mx = sparse_mx.tocoo().astype(np.float32)
-    indices = torch.from_numpy(np.vstack(
-            (sparse_mx.row, sparse_mx.col))).long()
-    values = torch.from_numpy(sparse_mx.data)
-    shape = torch.Size(sparse_mx.shape)
-    return torch.sparse.FloatTensor(indices, values, shape)
-    
-def adj_matrix(nc):
-    adj = sp.coo_matrix((np.ones(nc), (range(nc), range(nc))),shape=(nc, nc), dtype='float32')
-    adj = normt_spm(adj, method='in')
-    adj = spm_to_tensor(adj)
-    return adj
     
 def freeze_bn(model):
     for m in model.modules():
         if isinstance(m,nn.BatchNorm2d):
             m.eval()
-    
-def get_RANK(query_semantic, test_mask, classes):
-    query_semantic = query_semantic.cpu().numpy()
-    test_mask = test_mask.cpu().numpy()
-    query_semantic = query_semantic/np.linalg.norm(query_semantic,2,axis=1,keepdims=True)
-    test_mask = test_mask/np.linalg.norm(test_mask,2,axis=1,keepdims=True)
-    dist = np.dot(query_semantic, test_mask.transpose())
-    return classes[np.argmax(dist, axis=1)]
 
 
 def accuracy(output, target, topk=(1,)):
@@ -93,6 +54,15 @@ def softmax(x):
     softmax_x = exp_x / np.sum(exp_x,axis=1,keepdims=True)
     return softmax_x 
 
+def compute_class_accuracy_total( true_label, predict_label, classes):
+    nclass = len(classes)
+    acc_per_class = np.zeros((nclass, 1))
+    for i, class_i in enumerate(classes):
+        idx = np.where(true_label == class_i)[0]
+        acc_per_class[i] = (sum(true_label[idx] == predict_label[idx])*1.0 / len(idx))
+    return np.mean(acc_per_class)
+
+
 def compute_domain_accuracy(predict_label, domain):
     num = predict_label.shape[0]
     n = 0
@@ -102,49 +72,13 @@ def compute_domain_accuracy(predict_label, domain):
             
     return float(n)/num
 
-def compute_class_accuracy_total( true_label, predict_label, classes):
-    nclass = len(classes)
-    acc_per_class = np.zeros((nclass, 1))
-    for i, class_i in enumerate(classes):
-        idx = np.where(true_label == class_i)[0]
-        acc_per_class[i] = (sum(true_label[idx] == predict_label[idx])*1.0 / len(idx))
-    return np.mean(acc_per_class)
-
 def entropy(probs): 
     """ Computes entropy. """ 
     max_score = np.max(probs,axis=1)   
     return -max_score * np.log(max_score)
 
-def opt_domain_acc(cls_s,cls_t):
-    ''' source domain '''
-    opt_acc_s = 0
-    num_s = cls_s.shape[0]
-    max_score_s = np.max(cls_s,axis=1)   
-          
-    opt_acc_t = 0
-    num_t = cls_t.shape[0]
-    max_score_t = np.max(cls_t,axis=1)
-    
-    max_H = 0
-    opt_tau = 0
-    for step in range(10):
-        tau = 0.1*step
-        
-        idx = np.where(max_score_s>tau)
-        acc_s = float(idx[0].shape[0])/num_s 
-        
-        idx = np.where(max_score_t<tau)
-        acc_t = float(idx[0].shape[0])/num_t
-         
-        H = 2*acc_s*acc_t/(acc_s+acc_t) 
-        if H>max_H:
-            opt_acc_t = acc_t
-            opt_acc_s = acc_s
-            max_H = H
-            opt_tau = tau
-    return opt_acc_s,opt_acc_t,opt_tau
             
-def post_process(v_prob,a_prob,gt, split_num, seen_c,unseen_c,data):
+def post_process(v_prob,a_prob,gt, split_num, seen_c,unseen_c):
     v_max = np.max(v_prob,axis=1)
     H_v = entropy(v_prob)   
     v_pre = np.argmax(v_prob,axis=1)
@@ -317,3 +251,43 @@ def freeze_bn(model):
     for m in model.modules():
         if isinstance(m,nn.BatchNorm2d):
             m.eval()
+
+
+class ProgressMeter(object):
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch, logger):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        logger.info('\t'.join(entries))
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)

@@ -93,7 +93,7 @@ class DatasetFolder(data.Dataset):
         self.targets = [s[1] for s in samples]
 
         self.transform = transform
-        self.target_transform = target_transform
+        self.target_transform = None
 
     def _find_classes(self, dir):
         """
@@ -130,9 +130,7 @@ class DatasetFolder(data.Dataset):
         if self.transform is not None:
             sample = self.transform(sample)
         if self.target_transform is not None:
-            target = self.target_transform(target)
-        if sample.dim()==4:
-            target = torch.zeros(sample.shape[0],dtype=torch.int64)+target
+            target = self.target_transform(target)           
 		
         return sample, target
 

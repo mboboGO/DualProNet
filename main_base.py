@@ -16,7 +16,6 @@ import torch.distributed as dist
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
-import torch.nn.functional as F
 
 import sys
 import torchvision.transforms as transforms
@@ -64,8 +63,6 @@ parser.add_argument('--is_fix', dest='is_fix', action='store_true',
 ''' opt for model '''
 parser.add_argument('--backbone', default='resnet101', help='')
 parser.add_argument('--model', default='dvbe', help='')
-parser.add_argument('--n-enc', default=0, type=int, help='')
-parser.add_argument('--n-dec', default=3, type=int, help='')
 ''' opt for others '''
 parser.add_argument('--save-path', '-s', metavar='SAVE', default='',
                     help='saving path')
@@ -80,6 +77,8 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
 parser.add_argument('--dist-backend', default='gloo', type=str,
                     help='distributed backend')
 
+             
+best_prec1 = 0
 
 def main():
     args = parser.parse_args()
@@ -100,7 +99,8 @@ def main():
     main_worker(ngpus_per_node, args)
     
 def main_worker(ngpus_per_node, args):
-    best_prec1 = 0
+    global best_prec1
+    
     ''' multi-gpu '''
     if args.gpu is not None:
         print("Use GPU: {} for training".format(args.gpu))
@@ -169,10 +169,7 @@ def main_worker(ngpus_per_node, args):
         num_workers=args.workers, pin_memory=True, sampler=val_sampler2)
 
     ''' model building '''
-    if args.model=='base_s2v':
-        model = models.BaseS2V(pretrained=True,args=args)
-    elif args.model=='pro_net':
-        model = models.ProNet(pretrained=True,args=args)
+    model = models.BaseS2V(pretrained=True,args=args)
 
     if args.distributed:
         if args.is_syncbn:
@@ -204,7 +201,12 @@ def main_worker(ngpus_per_node, args):
                  ]
 
     ''' optimizer '''
-    optimizer = torch.optim.Adam(model.parameters(),args.lr, betas=(0.5,0.999),weight_decay=args.weight_decay)
+    base_params = [v for k, v in model.named_parameters() if 'zsr' not in k]
+    zsl_params = [v for k, v in model.named_parameters() if 'zsr' in k]
+    train_params = [{'params': base_params, 'lr': 0.1*args.lr},
+                    {'params': zsl_params, 'lr': args.lr},
+                    ]
+    optimizer = torch.optim.Adam(train_params,args.lr, betas=(0.5,0.999),weight_decay=args.weight_decay)
                      
     ''' optionally resume from a checkpoint'''
     if args.resume:
@@ -212,7 +214,8 @@ def main_worker(ngpus_per_node, args):
             args.logger.info("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
             #args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
+            if(best_prec1==0):
+                best_prec1 = checkpoint['best_prec1']
             args.logger.info('=> pretrained acc {:.4F}'.format(best_prec1))
             model.load_state_dict(checkpoint['state_dict'])
             #optimizer.load_state_dict(checkpoint['optimizer'])
@@ -222,7 +225,7 @@ def main_worker(ngpus_per_node, args):
             args.logger.info("=> no checkpoint found at '{}'".format(args.resume))
 
     cudnn.benchmark = True
-    
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -232,17 +235,14 @@ def main_worker(ngpus_per_node, args):
         train(train_loader,semantic_data, model, criterions, optimizer, epoch, args)
         
         # evaluate on validation set
-        prec1 = validate(val_loader1, val_loader2, semantic_data, model, args)
+        prec1 = validate(val_loader1, val_loader2, semantic_data, model, criterion, args)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
 
         # save model
-        if args.is_fix:
-            save_path = os.path.join(args.save_path,'fix.model')
-        else:
-            save_path = os.path.join(args.save_path,args.model+('_{:.4f}.model').format(best_prec1))
+        save_path = os.path.join(args.save_path,args.model+('_{:.4f}.model').format(best_prec1))
         if is_best:
             if 1:#dist.get_rank() == 0:
                 save_checkpoint({
@@ -255,8 +255,8 @@ def main_worker(ngpus_per_node, args):
 
 
 def train(train_loader, semantic_data, model, criterions, optimizer, epoch, args):   
-    Loss_s2v = AverageMeter('L_zsl', ':.4f')
-    Loss_cls = AverageMeter('L_cls', ':.4f')
+    Loss_s2v = AverageMeter('L_seg', ':.4f')
+    Loss_cls = AverageMeter('loss_D', ':.4f')
     progress = ProgressMeter(len(train_loader),
         [Loss_s2v,Loss_cls], 
         prefix="Epoch: [{}]".format(epoch))
@@ -274,20 +274,15 @@ def train(train_loader, semantic_data, model, criterions, optimizer, epoch, args
         target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
-        logit_zsl,logit_cls = model(input)
-        # zsl loss
-        L_s2v = 0
-        for logit in logit_zsl:
-            idx = torch.arange(logit.size(0)).long()
-            L_s2v += (1-logit[idx,target]).mean()/len(logit_zsl)
+        logit,logit_aux = model(input)
+        # loss
+        idx = torch.arange(logit.size(0)).long()
+        L_s2v = (1-logit[idx,target]).mean()
         Loss_s2v.update(L_s2v)
-        # cls loss
-        L_cls = 0
-        for logit in logit_cls:
-            L_cls += criterions[0](logit,target)/len(logit_cls)
+        L_cls = criterions[0](logit_aux,target)
         Loss_cls.update(L_cls)
-        # update
         total_loss = L_s2v + L_cls
+        # update
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -295,7 +290,7 @@ def train(train_loader, semantic_data, model, criterions, optimizer, epoch, args
         if i % args.print_freq == 0:
             progress.display(i,args.logger)
 
-def validate(val_loader1, val_loader2, semantic_data, model, args):
+def validate(val_loader1, val_loader2, semantic_data, model, criterion, args):
 
     ''' load semantic data'''
     seen_c = semantic_data['seen_class']
@@ -317,33 +312,46 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
                 input = input.view(N*M,C,H,W)   #flipping test
             
             # inference
-            logit_zsl, logit_cls = model(input)
-            logit_zsl = logit_zsl[-1]
-            logit_cls = logit_cls[-1]
+            logits,feats = model(input)
+            
             
             if args.flipping_test: 
-                logit_zsl = F.softmax(logit_zsl,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
-                logit_cls = F.softmax(logit_cls,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
+                odr_logit = F.softmax(odr_logit,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
+                zsl_logit = F.softmax(zsl_logit,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
             else:
-                logit_zsl = F.softmax(logit_zsl,dim=1).cpu().numpy()
-                logit_cls = F.softmax(logit_cls,dim=1).cpu().numpy()
-            logit_s = logit_zsl.copy();logit_s[:,unseen_c]=-1
-            logit_t = logit_zsl.copy();logit_t[:,seen_c]=-1
+                odr_logit = odr_logit.cpu().numpy()
+                zsl_logit = zsl_logit.cpu().numpy()
+            zsl_logit_s = zsl_logit.copy();zsl_logit_s[:,unseen_c]=-1
+            zsl_logit_t = zsl_logit.copy();zsl_logit_t[:,seen_c]=-1
             
+			
             # evaluation
             if(i==0):
                 gt_s = target.cpu().numpy()
-                ood_logit_s = logit_cls
-                zsl_logit_s = logit_zsl
-                zsl_logit_sA = logit_s
-                zsl_logit_sS = logit_s
-                zsl_logit_sT = logit_t
+                odr_pre_s = np.argmax(odr_logit, axis=1)
+                if args.flipping_test: 
+                    odr_prob_s = odr_logit
+                else:
+                    odr_prob_s = softmax(odr_logit)
+                zsl_pre_sA = np.argmax(zsl_logit, axis=1)
+                zsl_pre_sS = np.argmax(zsl_logit_s, axis=1)
+                if args.flipping_test:
+                    zsl_prob_s = zsl_logit_t
+                else: 
+                    zsl_prob_s = softmax(zsl_logit_t)
             else:
                 gt_s = np.hstack([gt_s,target.cpu().numpy()])
-                ood_logit_s = np.vstack([ood_logit_s,logit_cls])
-                zsl_logit_s = np.vstack([zsl_logit_s,logit_zsl])
-                zsl_logit_sS = np.vstack([zsl_logit_sS,logit_s])
-                zsl_logit_sT = np.vstack([zsl_logit_sT,logit_t])
+                odr_pre_s = np.hstack([odr_pre_s,np.argmax(odr_logit, axis=1)])
+                if args.flipping_test:
+                    odr_prob_s = np.vstack([odr_prob_s,odr_logit])
+                else:
+                    odr_prob_s = np.vstack([odr_prob_s,softmax(odr_logit)])
+                zsl_pre_sA = np.hstack([zsl_pre_sA,np.argmax(zsl_logit, axis=1)])
+                zsl_pre_sS = np.hstack([zsl_pre_sS,np.argmax(zsl_logit_s, axis=1)])
+                if args.flipping_test:
+                    zsl_prob_s = np.vstack([zsl_prob_s,zsl_logit_t])
+                else:
+                    zsl_prob_s = np.vstack([zsl_prob_s,softmax(zsl_logit_t)])
 
         for i, (input, target) in enumerate(val_loader2):
             if args.gpu is not None:
@@ -355,44 +363,61 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
                 input = input.view(N*M,C,H,W)   #flipping test
                 
             # inference
-            logit_zsl, logit_cls = model(input)         
-            logit_zsl = logit_zsl[-1]
-            logit_cls = logit_cls[-1]
+            logits,feats = model(input)         
+            
+            odr_logit = _get_concat_all_feat(logits[0])
+            zsl_logit = _get_concat_all_feat(logits[1])
+            target = _get_concat_all_feat(target)  
             
             if args.flipping_test: 
-                logit_zsl = F.softmax(logit_zsl,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
-                logit_cls = F.softmax(logit_cls,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
+                odr_logit = F.softmax(odr_logit,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
+                zsl_logit = F.softmax(zsl_logit,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
             else:
-                logit_zsl = F.softmax(logit_zsl,dim=1).cpu().numpy()
-                logit_cls = F.softmax(logit_cls,dim=1).cpu().numpy()
-            logit_s = logit_zsl.copy();logit_s[:,unseen_c]=-1
-            logit_t = logit_zsl.copy();logit_t[:,seen_c]=-1
+                odr_logit = odr_logit.cpu().numpy()
+                zsl_logit = zsl_logit.cpu().numpy()
+            zsl_logit_s = zsl_logit.copy();zsl_logit_s[:,unseen_c]=-1
+            zsl_logit_t = zsl_logit.copy();zsl_logit_t[:,seen_c]=-1
                 
-            # evaluation
             if(i==0):
                 gt_t = target.cpu().numpy()
-                ood_logit_t = logit_cls
-                zsl_logit_t = logit_zsl
-                zsl_logit_tT = logit_t
+                odr_pre_t = np.argmax(odr_logit, axis=1)
+                if args.flipping_test: 
+                    odr_prob_t = odr_logit
+                else:
+                    odr_prob_t = softmax(odr_logit)
+                zsl_pre_tA = np.argmax(zsl_logit, axis=1)
+                zsl_pre_tT = np.argmax(zsl_logit_t, axis=1)
+                if args.flipping_test: 
+                    zsl_prob_t = zsl_logit_t
+                else:
+                    zsl_prob_t = softmax(zsl_logit_t)
             else:
                 gt_t = np.hstack([gt_t,target.cpu().numpy()])
-                ood_logit_t = np.vstack([ood_logit_t,logit_cls])
-                zsl_logit_t = np.vstack([zsl_logit_t,logit_zsl])
-                zsl_logit_tT = np.vstack([zsl_logit_tT,logit_t])
+                odr_pre_t = np.hstack([odr_pre_t,np.argmax(odr_logit, axis=1)])
+                if args.flipping_test: 
+                    odr_prob_t = np.vstack([odr_prob_t,odr_logit])
+                else:
+                    odr_prob_t = np.vstack([odr_prob_t,softmax(odr_logit)])
+                zsl_pre_tA = np.hstack([zsl_pre_tA,np.argmax(zsl_logit, axis=1)])
+                zsl_pre_tT = np.hstack([zsl_pre_tT,np.argmax(zsl_logit_t, axis=1)])
+                if args.flipping_test: 
+                    zsl_prob_t = np.vstack([zsl_prob_t,zsl_logit_t])
+                else:
+                    zsl_prob_t = np.vstack([zsl_prob_t,softmax(zsl_logit_t)])
         
         
-        ood_logit = np.vstack([ood_logit_s,ood_logit_t])
-        zsl_logit = np.vstack([zsl_logit_s,zsl_logit_t])
+        odr_prob = np.vstack([odr_prob_s,odr_prob_t])
+        zsl_prob = np.vstack([zsl_prob_s,zsl_prob_t])
         gt = np.hstack([gt_s,gt_t])
     
-        SS = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_sS,axis=1),seen_c)
-        UU = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_tT,axis=1),unseen_c)
-        ST = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_s,axis=1),seen_c)
-        UT = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_t,axis=1),unseen_c)
+        SS = compute_class_accuracy_total(gt_s, zsl_pre_sS,seen_c)
+        UU = compute_class_accuracy_total(gt_t, zsl_pre_tT,unseen_c)
+        ST = compute_class_accuracy_total(gt_s, zsl_pre_sA,seen_c)
+        UT = compute_class_accuracy_total(gt_t, zsl_pre_tA,unseen_c)
         H = 2*ST*UT/(ST+UT) 
-        CLS = compute_class_accuracy_total(gt_s, np.argmax(ood_logit_s,axis=1),seen_c)
+        CLS = compute_class_accuracy_total(gt_s, odr_pre_s,seen_c)
         
-        H_opt,S_opt,U_opt,Ds_opt,Du_opt,tau = post_process(ood_logit, np.vstack([zsl_logit_sT,zsl_logit_tT]), gt, gt_s.shape[0],seen_c,unseen_c)
+        H_opt,S_opt,U_opt,Ds_opt,Du_opt,tau = post_process(odr_prob, zsl_prob, gt, gt_s.shape[0], seen_c,unseen_c, args.data)
         
         args.logger.info(' SS: {:.4f} UU: {:.4f} ST: {:.4f} UT: {:.4f} H: {:.4f}'
               .format(SS,UU,ST,UT,H))
