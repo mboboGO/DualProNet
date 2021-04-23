@@ -201,36 +201,6 @@ class Randomswap(object):
     def __call__(self, img):
         return swap(img, self.size)
         
-
-def preprocess_strategy(dataset,args):
-    train_transforms = transforms.Compose([
-            transforms.RandomResizedCrop(448),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.5),
-            transforms.RandomApply([Randomswap(3)], p=0.2),
-            transforms.ToTensor(),
-            normalize
-            ])
-        
-    if args.flipping_test:
-        val_transforms = transforms.Compose([
-            transforms.Resize(480),
-            transforms.CenterCrop(448),
-            transforms.Lambda(lambda x: [x,transforms.RandomHorizontalFlip(p=1.0)(x)]),
-            transforms.Lambda(lambda crops: [transforms.ToTensor()(crop) for crop in crops]),
-            transforms.Lambda(lambda crops: [normalize(crop) for crop in crops]),
-            transforms.Lambda(lambda crops: torch.stack(crops))
-        ])    
-    else:
-        val_transforms = transforms.Compose([
-            transforms.Resize(480),
-            transforms.CenterCrop(448),
-            transforms.ToTensor(),
-            normalize,
-        ])  
-
-    return train_transforms, val_transforms
-    
 def count_parameters_in_MB(model):
     return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name)/1e6
     

@@ -44,6 +44,7 @@ parser.add_argument('--seed', default=None, type=int,
 parser.add_argument('--gpu', default=None, type=int,
                     help='GPU id to use.')
 parser.add_argument('--is-syncbn', action='store_true', help='')
+parser.add_argument('--distributed', action='store_true',help='is distributed.')
 ''' opt for optimizer'''
 parser.add_argument('--epochs', default=180, type=int, metavar='N',
                     help='number of total epochs to run')
@@ -63,9 +64,12 @@ parser.add_argument('--is_fix', dest='is_fix', action='store_true',
                     help='is_fix.')
 ''' opt for model '''
 parser.add_argument('--backbone', default='resnet101', help='')
-parser.add_argument('--model', default='dvbe', help='')
+parser.add_argument('--model', default='dpn', help='')
 parser.add_argument('--n-enc', default=0, type=int, help='')
 parser.add_argument('--n-dec', default=3, type=int, help='')
+parser.add_argument('--vis-emb-dim', default=512, type=int, help='')
+parser.add_argument('--att-emb-dim', default=8, type=int, help='')
+parser.add_argument('--L_cls', default=1.0, type=float, help='')
 ''' opt for others '''
 parser.add_argument('--save-path', '-s', metavar='SAVE', default='',
                     help='saving path')
@@ -95,7 +99,6 @@ def main():
         warnings.warn('You have chosen a specific GPU. This will completely '
                       'disable data parallelism.')
 
-    args.distributed = False
     ngpus_per_node = torch.cuda.device_count()
     main_worker(ngpus_per_node, args)
     
@@ -109,10 +112,14 @@ def main_worker(ngpus_per_node, args):
         torch.distributed.init_process_group(backend="nccl", init_method="env://")
         
     ''' logger '''
-    if args.distributed:
-        args.logger = setup_logger(output=args.save_path, distributed_rank=dist.get_rank(), name="model")
+    if args.is_fix:
+        phase='fix'
     else:
-        args.logger = setup_logger(output=args.save_path, phase='ft')
+        phase='ft'
+    if args.distributed:
+        args.logger = setup_logger(output=args.save_path, distributed_rank=dist.get_rank(), phase=phase, name="model")
+    else:
+        args.logger = setup_logger(output=args.save_path, phase=phase)
     args.logger.info(args)
 
     ''' seed '''
@@ -138,7 +145,31 @@ def main_worker(ngpus_per_node, args):
     valdir1 = os.path.join('./data',args.data_name,'test_seen.list')
     valdir2 = os.path.join('./data',args.data_name,'test_unseen.list')
 
-    train_transforms, val_transforms = preprocess_strategy(args.data_name,args)
+    train_transforms = transforms.Compose([
+            transforms.RandomResizedCrop(448),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.5),
+            transforms.RandomApply([Randomswap(3)], p=0.2),
+            transforms.ToTensor(),
+            normalize
+            ])
+    
+    if args.flipping_test:
+        val_transforms = transforms.Compose([
+            transforms.Resize(480),
+            transforms.CenterCrop(448),
+            transforms.Lambda(lambda x: [x,transforms.RandomHorizontalFlip(p=1.0)(x)]),
+            transforms.Lambda(lambda crops: [transforms.ToTensor()(crop) for crop in crops]),
+            transforms.Lambda(lambda crops: [normalize(crop) for crop in crops]),
+            transforms.Lambda(lambda crops: torch.stack(crops))
+        ])    
+    else:
+        val_transforms = transforms.Compose([
+            transforms.Resize(480),
+            transforms.CenterCrop(448),
+            transforms.ToTensor(),
+            normalize,
+        ])  
 
     train_dataset = datasets.ImageFolder(args.data,traindir,train_transforms)
     val_dataset1 = datasets.ImageFolder(args.data,valdir1, val_transforms)
@@ -171,8 +202,12 @@ def main_worker(ngpus_per_node, args):
     ''' model building '''
     if args.model=='base_s2v':
         model = models.BaseS2V(pretrained=True,args=args)
-    elif args.model=='pro_net':
-        model = models.ProNet(pretrained=True,args=args)
+    elif args.model=='dpn':
+        model = models.DPN(pretrained=True,args=args)
+    elif args.model=='dpn_seq':
+        model = models.DPN_seq(pretrained=True,args=args)
+    elif args.model=='dpn_ind':
+        model = models.DPN_ind(pretrained=True,args=args)
 
     if args.distributed:
         if args.is_syncbn:
@@ -205,7 +240,7 @@ def main_worker(ngpus_per_node, args):
 
     ''' optimizer '''
     optimizer = torch.optim.Adam(model.parameters(),args.lr, betas=(0.5,0.999),weight_decay=args.weight_decay)
-                     
+    
     ''' optionally resume from a checkpoint'''
     if args.resume:
         if os.path.isfile(args.resume):
@@ -318,8 +353,8 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
             
             # inference
             logit_zsl, logit_cls = model(input)
-            logit_zsl = logit_zsl[-1]
-            logit_cls = logit_cls[-1]
+            logit_zsl = logit_zsl[0]
+            logit_cls = logit_cls[0]
             
             if args.flipping_test: 
                 logit_zsl = F.softmax(logit_zsl,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
@@ -356,8 +391,8 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
                 
             # inference
             logit_zsl, logit_cls = model(input)         
-            logit_zsl = logit_zsl[-1]
-            logit_cls = logit_cls[-1]
+            logit_zsl = logit_zsl[0]
+            logit_cls = logit_cls[0]
             
             if args.flipping_test: 
                 logit_zsl = F.softmax(logit_zsl,dim=1).view(N,M,-1).mean(dim=1).cpu().numpy()
@@ -390,16 +425,10 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
         ST = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_s,axis=1),seen_c)
         UT = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_t,axis=1),unseen_c)
         H = 2*ST*UT/(ST+UT) 
-        CLS = compute_class_accuracy_total(gt_s, np.argmax(ood_logit_s,axis=1),seen_c)
-        
-        H_opt,S_opt,U_opt,Ds_opt,Du_opt,tau = post_process(ood_logit, np.vstack([zsl_logit_sT,zsl_logit_tT]), gt, gt_s.shape[0],seen_c,unseen_c)
         
         args.logger.info(' SS: {:.4f} UU: {:.4f} ST: {:.4f} UT: {:.4f} H: {:.4f}'
               .format(SS,UU,ST,UT,H))
-        args.logger.info('CLS {:.4f} S_opt: {:.4f} U_opt {:.4f} H_opt {:.4f} Ds_opt {:.4f} Du_opt {:.4f} tau {:.4f}'
-              .format(CLS, S_opt, U_opt,H_opt,Ds_opt,Du_opt,tau))
               
-        H = max(H,H_opt)
     return H
     
 def _get_concat_all_feat(tensor):

@@ -87,18 +87,21 @@ class PrtCateLayer(nn.Module):
         # prt refinement
         prt = self.linear2(self.activation(self.linear1(prt)))
         # Excitation
-        prt = prt * w + self.weight_bias
+        prt = self.weight_bias + prt * w
         return prt
 
-    def forward(self, cls_prt, query):
+    def forward(self,query,cls_prt):
         # in_prt: 200*64*c
         # query: 64*c
+        # refine
         cls_prt = self.prt_refine(cls_prt)
-        return cls_prt,self.bias
+        # assign
+        logit = F.linear(query, cls_prt, self.bias)
+        return logit,cls_prt
         
-class ProNet(nn.Module):
+class DPN_seq(nn.Module):
     def __init__(self, pretrained=True, args=None):
-        super(ProNet, self).__init__()
+        super(DPN_seq, self).__init__()
         ''' default '''
         num_classes = args.num_classes
         is_fix = args.is_fix
@@ -203,14 +206,11 @@ class ProNet(nn.Module):
             logit_zsl = [x_norm.mm(w_norm.permute(1,0))]
             logit_cls = [self.zsr_aux_cls(zsr_x)]
         else:
-            # prt init
-            zsl_prt_init = self.zsl_prt_emb.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
-            cls_prt_init = self.cls_prt_emb#.unsqueeze(1).repeat(1, bs, 1).cuda()
             # semantic projection
             sem_emb = self.sem_proj(self.sf.cuda())
             sem_emb_norm = F.normalize(sem_emb, p=2, dim=1)
             # attriute prototype refine
-            vis_prt = zsl_prt_init
+            vis_prt = self.zsl_prt_emb.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
             vis_embs = []
             logit_zsl = []
             for dec,proj in zip(self.zsl_prt_dec,self.zsl_prt_s2v):
@@ -219,13 +219,17 @@ class ProNet(nn.Module):
                 vis_embs.append(vis_emb)
                 vis_emb_norm = F.normalize(vis_emb, p=2, dim=1)
                 logit_zsl.append(vis_emb_norm.mm(sem_emb_norm.permute(1,0)))
+                                           
             # category prototype refine
-            cls_prt = cls_prt_init
+            cls_prt = self.cls_prt_emb.cuda()
             logit_cls = []
-            for dec,query in zip(self.cls_prt_dec,vis_embs):        
-                cls_prt,bias = dec(cls_prt,query)
-                logit = F.linear(query, cls_prt, bias)
-                logit = query.mm(cls_prt.permute(1,0))
+            for dec,query in zip(self.cls_prt_dec,vis_embs):  
+                #logit = F.linear(query, cls_prt, cls_bias)
+                logit,cls_prt = dec(query,cls_prt)
+                #logit = query.mm(cls_prt.permute(1,0))
                 logit_cls.append(logit)
+                
+        logit_zsl.reverse() 
+        logit_cls.reverse() 
 
         return logit_zsl,logit_cls

@@ -1,0 +1,4 @@
+nohup: ignoring input
+['build_position_encoding', 'load_state_dict_from_url']
+[32m[04/23 17:16:22 zsl]: [0mNamespace(L_cls=1.0, att_emb_dim=8, backbone='resnet101', batch_size=512, data='../../data/CUB_200_2011/CUB_200_2011/images/', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', distributed=False, epoch_decay=30, epochs=90, flipping_test=False, gpu=None, is_fix=True, is_syncbn=False, local_rank=0, logger=<Logger zsl (DEBUG)>, lr=0.0004, model='dpn', momentum=0.9, n_dec=3, n_enc=0, print_freq=10, resume='', save_path='output/cub/run_r101_dpn_bs64', seed=1887, start_epoch=0, vis_emb_dim=512, weight_decay=0.0001, workers=32, world_size=1)
+[32m[04/23 17:16:22 zsl]: [0m==> random seed: 1887
