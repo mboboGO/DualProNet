@@ -90,7 +90,7 @@ class DPN(nn.Module):
         
         ''' backbone net'''
         if args.backbone=='resnet101':
-            self.backbone = torchvision.models.resnet101()
+            self.backbone = torchvision.models.resnet101().to('cuda:0')
         elif args.backbone=='resnet50':
             self.backbone = torchvision.models.resnet50()
         self.avgpool = nn.AdaptiveAvgPool2d(1)
@@ -172,17 +172,26 @@ class DPN(nn.Module):
         if self.args.n_dec==0:
             x = vis_query.permute(1, 2, 0).view(bs, c, h, w)
             zsr_x = self.avgpool(x).view(bs,-1)
-            zsr_w = self.sem_proj(self.sf.cuda())
+            if self.args.gpu is not None:
+                zsr_w = self.sem_proj(self.sf.cuda(self.args.gpu))
+            else:
+                zsr_w = self.sem_proj(self.sf.cuda())
             w_norm = F.normalize(zsr_w, p=2, dim=1)
             x_norm = F.normalize(zsr_x, p=2, dim=1)
             logit_zsl = [x_norm.mm(w_norm.permute(1,0))]
             logit_cls = [self.zsr_aux_cls(zsr_x)]
         else:
             # semantic projection
-            sem_emb = self.sem_proj(self.sf.cuda())
+            if self.args.gpu is not None:
+                sem_emb = self.sem_proj(self.sf.cuda(self.args.gpu))
+            else:
+                sem_emb = self.sem_proj(self.sf.cuda())
             sem_emb_norm = F.normalize(sem_emb, p=2, dim=1)
             # attriute prototype refine
-            vis_prt = self.zsl_prt_emb.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
+            if self.args.gpu is not None:
+                vis_prt = self.zsl_prt_emb.weight.unsqueeze(1).repeat(1, bs, 1).cuda(self.args.gpu)
+            else:
+                vis_prt = self.zsl_prt_emb.weight.unsqueeze(1).repeat(1, bs, 1).cuda()
             vis_embs = []
             logit_zsl = []
             for dec,proj in zip(self.zsl_prt_dec,self.zsl_prt_s2v):
@@ -193,7 +202,10 @@ class DPN(nn.Module):
                 logit_zsl.append(vis_emb_norm.mm(sem_emb_norm.permute(1,0)))
             vis_embs.reverse()                            
             # category prototype refine
-            cls_prt = self.cls_prt_emb.cuda()
+            if self.args.gpu is not None:
+                cls_prt = self.cls_prt_emb.cuda(self.args.gpu)
+            else:
+                cls_prt = self.cls_prt_emb.cuda()
             logit_cls = []
             for dec,query in zip(self.cls_prt_dec,vis_embs):  
                 logit,cls_prt = dec(query,cls_prt)

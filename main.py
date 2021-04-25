@@ -83,6 +83,9 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='gloo', type=str,
                     help='distributed backend')
+                    
+parser.add_argument('--pp_test', action='store_true', help='test w. post processing')
+parser.add_argument('--eval_only', action='store_true', help='only eval without training')
 
 
 def main():
@@ -233,8 +236,12 @@ def main_worker(ngpus_per_node, args):
         # comment out the following line for debugging
     else:
         model = torch.nn.DataParallel(model).cuda()
-        
-    criterions = [nn.CrossEntropyLoss().cuda(),
+    if args.gpu is not None:   
+        criterions = [nn.CrossEntropyLoss().cuda(args.gpu),
+                 nn.MSELoss().cuda(args.gpu),
+                 ]
+    else:
+        criterions = [nn.CrossEntropyLoss().cuda(),
                  nn.MSELoss().cuda(),
                  ]
 
@@ -263,6 +270,11 @@ def main_worker(ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer, epoch, args.lr, args.epoch_decay)
         
+        
+        if args.eval_only:      
+            prec1 = validate(val_loader1, val_loader2, semantic_data, model, args)
+            break
+            
         # train for one epoch
         train(train_loader,semantic_data, model, criterions, optimizer, epoch, args)
         
@@ -422,12 +434,25 @@ def validate(val_loader1, val_loader2, semantic_data, model, args):
     
         SS = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_sS,axis=1),seen_c)
         UU = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_tT,axis=1),unseen_c)
-        ST = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_s,axis=1),seen_c)
-        UT = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_t,axis=1),unseen_c)
-        H = 2*ST*UT/(ST+UT) 
-        
-        args.logger.info(' SS: {:.4f} UU: {:.4f} ST: {:.4f} UT: {:.4f} H: {:.4f}'
+        if not args.pp_test:
+            ST = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_s,axis=1),seen_c)
+            UT = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_t,axis=1),unseen_c)
+            H = 2*ST*UT/(ST+UT) 
+            args.logger.info(' SS: {:.4f} UU: {:.4f} ST: {:.4f} UT: {:.4f} H: {:.4f}'
               .format(SS,UU,ST,UT,H))
+        else:            
+            for th_pp in np.arange(0.991,1.0,0.001):
+                zsl_logit_s1 = zsl_logit_s.copy()
+                zsl_logit_t1 = zsl_logit_t.copy()
+                zsl_logit_s1[:,seen_c] = zsl_logit_s1[:,seen_c] * th_pp
+                zsl_logit_t1[:,seen_c] = zsl_logit_t1[:,seen_c] * th_pp
+                ST = compute_class_accuracy_total(gt_s, np.argmax(zsl_logit_s1,axis=1),seen_c)
+                UT = compute_class_accuracy_total(gt_t, np.argmax(zsl_logit_t1,axis=1),unseen_c)
+                H = 2*ST*UT/(ST+UT) 
+        
+                args.logger.info("th_pp:  ".format(th_pp))
+                args.logger.info(' SS: {:.4f} UU: {:.4f} ST: {:.4f} UT: {:.4f} H: {:.4f}'
+                      .format(SS,UU,ST,UT,H))
               
     return H
     

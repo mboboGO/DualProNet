@@ -3,7 +3,7 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-export CUDA_VISIBLE_DEVICES=2,4
+export CUDA_VISIBLE_DEVICES=3,7
 
 MODEL=dpn
 DATANAME=cub
@@ -33,7 +33,7 @@ if [ ${STAGE2} = 1 ]
 then
   python main.py \
     --batch-size 64 \
-    --lr 3e-4 \
+    --lr 2e-4 \
     --n-dec 3 \
     --epochs 90 \
     --backbone ${BACKBONE} \

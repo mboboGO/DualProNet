@@ -3,7 +3,7 @@ script_name1=`basename $0`
 script_name=${script_name1:0:${#script_name1}-3}
 cd ..
 
-export CUDA_VISIBLE_DEVICES=1,3
+export CUDA_VISIBLE_DEVICES=0,1
 
 MODEL=dpn
 DATANAME=cub

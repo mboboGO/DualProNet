@@ -1,0 +1,8 @@
+nohup: ignoring input
+['build_position_encoding', 'load_state_dict_from_url']
+[32m[04/25 20:22:04 zsl]: [0mNamespace(L_cls=1.0, att_emb_dim=8, backbone='resnet101', batch_size=64, data='../../data/CUB_200_2011/CUB_200_2011/images/', data_name='cub', dist_backend='gloo', dist_url='tcp://224.66.41.62:23456', distributed=False, epoch_decay=30, epochs=90, flipping_test=False, gpu=None, is_fix=False, is_syncbn=False, local_rank=0, logger=<Logger zsl (DEBUG)>, lr=0.0002, model='dpn', momentum=0.9, n_dec=3, n_enc=0, print_freq=10, resume='output/cub/run_r101_dpn_bs64_lr2e-4_fixfrombs32/fix.model', save_path='output/cub/run_r101_dpn_bs64_lr2e-4_fixfrombs32', seed=9144, start_epoch=0, vis_emb_dim=512, weight_decay=0.0001, workers=32, world_size=1)
+[32m[04/25 20:22:04 zsl]: [0m==> random seed: 9144
+[32m[04/25 20:22:07 zsl]: [0m=> loading checkpoint 'output/cub/run_r101_dpn_bs64_lr2e-4_fixfrombs32/fix.model'
+[32m[04/25 20:22:07 zsl]: [0m=> pretrained acc 0.5061
+[32m[04/25 20:22:07 zsl]: [0m=> loaded checkpoint 'output/cub/run_r101_dpn_bs64_lr2e-4_fixfrombs32/fix.model' (epoch 42)
+run_r101_dpn_bs64_lr2e-4_fixfrombs32.sh: line 45: 50407 Terminated              python main.py --batch-size 64 --lr 2e-4 --n-dec 3 --epochs 90 --backbone ${BACKBONE} --model ${MODEL} --data-name ${DATANAME} --save-path ${SAVEPATH} --data ${DATAPATH} --resume ${SAVEPATH}/fix.model
